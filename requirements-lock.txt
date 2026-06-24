@@ -1,0 +1,7 @@
+# Minimal reproducibility environment used during package creation.
+# Regenerate with your preferred resolver before release if exact hashes are required.
+dimod==0.12.21
+dwave-neal
+numpy==1.26.4
+PyYAML==6.0.2
+sympy==1.13.3

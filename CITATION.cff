@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+title: "rolling-precision-qubo"
+message: "If you use this software, please cite the associated paper."
+type: software
+authors:
+  - family-names: Iftakher
+    given-names: Ashfaq
+date-released: 2026-06-23
+version: 0.1.0
+repository-code: "https://github.com/aiftakher/rolling-precision-qubo"
+preferred-citation:
+  type: article
+  title: "Solving Mixed-Integer Problems as QUBO: Encodings, Reformulations, and Rolling-precision Algorithm"
+  authors:
+    - family-names: Iftakher
+      given-names: Ashfaq
