@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import platform
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from . import paper_expectations as expect
 from .builders import build_qubo_from_mapping
 from .encodings import encode_variable, nonlinear_error_table
 from .examples import (
@@ -60,9 +62,7 @@ def _cmd_encode_variable(args: argparse.Namespace) -> None:
     elif kind == "slack":
         var = SlackVar(args.name, float(args.lower), float(args.upper), args.digits, encoding)
     else:
-        var = ContinuousVar(
-            args.name, float(args.lower), float(args.upper), args.digits, encoding
-        )
+        var = ContinuousVar(args.name, float(args.lower), float(args.upper), args.digits, encoding)
     _print_json(encode_variable(var).to_dict())
 
 
@@ -194,11 +194,28 @@ def _cmd_reproduce_paper(args: argparse.Namespace) -> None:
         write("alan_penalty_sensitivity", reproduce_alan_penalty_sensitivity())
     report_path = out_dir / "reproducibility_report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
+    checks = _paper_checks(generated)
+    overall_passed = all(bool(check["passed"]) for check in checks.values())
+    all_exact = all(bool(check["exact_reference_match"]) for check in checks.values())
+    git_status = _git(["status", "--porcelain"])
     report = {
+        "overall_passed": overall_passed,
+        "all_exact_reference_matches": all_exact,
         "repository_commit": _git(["rev-parse", "HEAD"]),
-        "repository_dirty": bool(_git(["status", "--porcelain"])),
+        "repository_dirty": None if git_status is None else bool(git_status),
         "python": sys.version,
+        "python_requires": ">=3.10",
+        "platform": platform.platform(),
         "package_versions": package_versions(),
+        "solver_parameters": {
+            "example1_bit_growth": EXAMPLE1_BIT_GROWTH.anneal.__dict__,
+            "example1_zoom": EXAMPLE1_ZOOM.anneal.__dict__,
+            "example2_bit_growth": EXAMPLE2_BIT_GROWTH.anneal.__dict__,
+            "example2_zoom": EXAMPLE2_ZOOM.anneal.__dict__,
+            "alan_bit_growth": ALAN_BIT_GROWTH.anneal.__dict__,
+            "alan_table6_reference": ALAN_TABLE6_REFERENCE.anneal.__dict__,
+            "alan_penalty_sensitivity": ALAN_PENALTY_SENSITIVITY.anneal.__dict__,
+        },
         "configurations": {
             "table1": EXAMPLE1_BIT_GROWTH.name,
             "table2": EXAMPLE1_ZOOM.name,
@@ -208,8 +225,16 @@ def _cmd_reproduce_paper(args: argparse.Namespace) -> None:
             "table6": ALAN_TABLE6_REFERENCE.name,
             "table9": ALAN_PENALTY_SENSITIVITY.name,
         },
-        "checks": _paper_checks(generated),
+        "checks": checks,
         "written": written,
+        "accepted_table9_reference": {
+            "path": str(expect.TABLE9_REFERENCE_PATH),
+            "sha256": expect.reference_table9_sha256() or expect.TABLE9_REFERENCE_SHA256,
+        },
+        "neal_heuristic_notice": (
+            "neal is a heuristic simulated annealing backend; it does not certify "
+            "global optimality and seeded tie-breaking may differ across environments."
+        ),
         "known_discrepancies": [
             {
                 "table": "Alan Table 6",
@@ -221,9 +246,11 @@ def _cmd_reproduce_paper(args: argparse.Namespace) -> None:
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     written.append(str(report_path))
     _print_json({"written": written})
+    if args.strict and not overall_passed:
+        raise SystemExit(1)
 
 
-def _git(args: list[str]) -> str:
+def _git(args: list[str]) -> str | None:
     try:
         proc = subprocess.run(
             ["git", *args],
@@ -232,49 +259,288 @@ def _git(args: list[str]) -> str:
             text=True,
         )
     except OSError:
-        return ""
+        return None
+    if proc.returncode != 0:
+        return None
     return proc.stdout.strip()
 
 
 def _paper_checks(rows: dict[str, list[dict[str, Any]]]) -> dict[str, dict[str, object]]:
     checks: dict[str, dict[str, object]] = {}
 
-    def sizes(name: str) -> list[tuple[int, int]]:
-        return [(int(row["n_vars"]), int(row["n_quad"])) for row in rows.get(name, [])]
-
-    checks["table1"] = {
-        "passed": sizes("ex1_unconstrained_bit_growth")
-        == [(18, 72), (34, 272), (50, 600), (66, 1056)]
-    }
-    checks["table2"] = {
-        "passed": sizes("ex1_unconstrained_zoom") == [(10, 20)] * 5
-    }
-    checks["table3"] = {
-        "passed": sizes("ex2_miqp_bit_growth") == [(11, 55), (19, 171), (35, 595)]
-    }
-    table4 = rows.get("ex2_miqp_zoom", [])
-    checks["table4"] = {
-        "passed": [row.get("action") for row in table4]
-        == ["baseline", "accepted_zoom", "accepted_zoom", "backtrack", "accepted_zoom"]
-    }
-    checks["table5"] = {
-        "passed": sizes("ex3_alan_bit_growth")
-        == [(49, 406), (85, 1248), (121, 2554), (157, 4324), (173, 5820), (301, 16044)]
-    }
-    table6 = rows.get("ex3_alan_zoom", [])
-    checks["table6"] = {
-        "passed": len(table6) >= 2
-        and table6[0].get("action") == "baseline"
-        and table6[1].get("action") == "accepted_zoom"
-        and abs(float(table6[1].get("objective", 0.0)) - 2.928) <= 1e-9
-    }
-    checks["table9"] = {
-        "passed": len(rows.get("alan_penalty_sensitivity", [])) == 7
-    }
-    checks["nonlinear"] = {
-        "passed": len(rows.get("nonlinear_encoding_error", [])) == 6
-    }
+    if "ex1_unconstrained_bit_growth" in rows:
+        checks["table1"] = _check_table1(rows["ex1_unconstrained_bit_growth"])
+    if "ex1_unconstrained_zoom" in rows:
+        checks["table2"] = _check_table2(rows["ex1_unconstrained_zoom"])
+    if "ex2_miqp_bit_growth" in rows:
+        checks["table3"] = _check_table3(rows["ex2_miqp_bit_growth"])
+    if "ex2_miqp_zoom" in rows:
+        checks["table4"] = _check_table4(rows["ex2_miqp_zoom"])
+    if "ex3_alan_bit_growth" in rows:
+        checks["table5"] = _check_table5(rows["ex3_alan_bit_growth"])
+    if "ex3_alan_zoom" in rows:
+        checks["table6"] = _check_table6(rows["ex3_alan_zoom"])
+    if "alan_penalty_sensitivity" in rows:
+        checks["table9"] = _check_table9(rows["alan_penalty_sensitivity"])
+    if "nonlinear_encoding_error" in rows:
+        checks["nonlinear"] = _check_nonlinear(rows["nonlinear_encoding_error"])
     return checks
+
+
+def _check_result(
+    passed: bool,
+    *,
+    details: dict[str, object],
+    status: str = "exact_reference_match",
+    exact: bool = True,
+) -> dict[str, object]:
+    return {
+        "passed": passed,
+        "status": status if passed else "failed",
+        "exact_reference_match": bool(passed and exact),
+        "details": details,
+    }
+
+
+def _as_float(value: object) -> float:
+    return float(cast(Any, value))
+
+
+def _as_int(value: object) -> int:
+    return int(cast(Any, value))
+
+
+def _close(value: object, expected: float, tolerance: float = expect.VALUE_ATOL) -> bool:
+    return abs(_as_float(value) - expected) <= tolerance
+
+
+def _objective_close(value: object, expected: float) -> bool:
+    return abs(_as_float(value) - expected) <= max(
+        expect.OBJECTIVE_ATOL,
+        abs(expected) * 1e-8,
+    )
+
+
+def _x_values(row: dict[str, Any]) -> tuple[float, float, float, float]:
+    raw = row["x"]
+    if isinstance(raw, dict):
+        return tuple(float(raw[f"x{i}"]) for i in range(1, 5))  # type: ignore[return-value]
+    if isinstance(raw, str):
+        stripped = raw.strip()
+        if stripped.startswith("{"):
+            parsed = json.loads(stripped)
+            return tuple(float(parsed[f"x{i}"]) for i in range(1, 5))  # type: ignore[return-value]
+        values = [float(part) for part in stripped.strip("[]").split(",")]
+        return tuple(values[:4])  # type: ignore[return-value]
+    raise TypeError("x field must be a mapping or encoded list")
+
+
+def _check_table1(rows: list[dict[str, Any]]) -> dict[str, object]:
+    failures: list[str] = []
+    if len(rows) != len(expect.TABLE1):
+        failures.append("wrong row count")
+    for index, expected in enumerate(expect.TABLE1):
+        if index >= len(rows):
+            break
+        row = rows[index]
+        for key in ("J1", "J2", "n_vars", "n_quad"):
+            if _as_int(row[key]) != _as_int(expected[key]):
+                failures.append(f"row {index} {key}")
+        for key in ("x1", "x2"):
+            if not _close(row[key], _as_float(expected[key]), 5e-7):
+                failures.append(f"row {index} {key}")
+        if not _objective_close(row["objective"], _as_float(expected["objective"])):
+            failures.append(f"row {index} objective")
+    return _check_result(not failures, details={"failures": failures})
+
+
+def _check_table2(rows: list[dict[str, Any]]) -> dict[str, object]:
+    failures: list[str] = []
+    if len(rows) != len(expect.TABLE2):
+        failures.append("wrong row count")
+    for index, expected in enumerate(expect.TABLE2):
+        if index >= len(rows):
+            break
+        row = rows[index]
+        if row.get("action") != expected["action"]:
+            failures.append(f"row {index} action")
+        for key in ("x1", "x2"):
+            if not _close(row[key], _as_float(expected[key]), 5e-6):
+                failures.append(f"row {index} {key}")
+        if int(row["n_vars"]) != 10 or int(row["n_quad"]) != 20:
+            failures.append(f"row {index} dimensions")
+    return _check_result(not failures, details={"failures": failures})
+
+
+def _check_table3(rows: list[dict[str, Any]]) -> dict[str, object]:
+    failures: list[str] = []
+    tied_state: tuple[float, int, float] | None = None
+    if len(rows) != len(expect.TABLE3):
+        failures.append("wrong row count")
+    for index, expected in enumerate(expect.TABLE3):
+        if index >= len(rows):
+            break
+        row = rows[index]
+        if _as_int(row["Jx"]) != _as_int(expected["Jx"]) or _as_int(row["Js"]) != _as_int(
+            expected["Js"]
+        ):
+            failures.append(f"row {index} precision")
+        if _as_int(row["n_vars"]) != _as_int(expected["n_vars"]) or _as_int(
+            row["n_quad"]
+        ) != _as_int(expected["n_quad"]):
+            failures.append(f"row {index} dimensions")
+        if not _objective_close(row["objective"], _as_float(expected["objective"])):
+            failures.append(f"row {index} objective")
+        if abs(_as_float(row["feasibility"])) > 1e-9:
+            failures.append(f"row {index} feasibility")
+        if index == 0:
+            tied_state = (
+                round(_as_float(row["x"]), 10),
+                _as_int(row["y"]),
+                round(_as_float(row["s"]), 10),
+            )
+            tied_expected = {
+                (round(x, 10), y, round(s, 10)) for x, y, s in expect.TABLE3_J1_TIED_STATES
+            }
+            if tied_state not in tied_expected:
+                failures.append("row 0 tied state")
+        else:
+            for key in ("x", "s"):
+                if not _close(row[key], _as_float(expected[key]), 5e-9):
+                    failures.append(f"row {index} {key}")
+            if _as_int(row["y"]) != _as_int(expected["y"]):
+                failures.append(f"row {index} y")
+    exact = tied_state == expect.TABLE3_J1_TIED_STATES[0]
+    status = "exact_reference_match" if exact else "accepted_tied_optimum"
+    return _check_result(
+        not failures,
+        details={"failures": failures, "observed_j1_tied_state": tied_state},
+        status=status,
+        exact=exact,
+    )
+
+
+def _check_table4(rows: list[dict[str, Any]]) -> dict[str, object]:
+    failures: list[str] = []
+    if len(rows) != len(expect.TABLE4):
+        failures.append("wrong row count")
+    for index, expected in enumerate(expect.TABLE4):
+        if index >= len(rows):
+            break
+        row = rows[index]
+        if row.get("action") != expected["action"]:
+            failures.append(f"row {index} action")
+        if not _close(row["x"], _as_float(expected["x"]), 5e-9):
+            failures.append(f"row {index} x")
+        if _as_int(row["n_vars"]) != 11 or _as_int(row["n_quad"]) != 55:
+            failures.append(f"row {index} dimensions")
+    if rows and abs(_as_float(rows[-1]["feasibility"])) > 1e-9:
+        failures.append("final feasibility")
+    return _check_result(not failures, details={"failures": failures})
+
+
+def _check_table5(rows: list[dict[str, Any]]) -> dict[str, object]:
+    failures: list[str] = []
+    if len(rows) != len(expect.TABLE5):
+        failures.append("wrong row count")
+    for index, expected in enumerate(expect.TABLE5):
+        if index >= len(rows):
+            break
+        row = rows[index]
+        if _as_int(row["Jx"]) != _as_int(expected["Jx"]) or _as_int(row["Js"]) != _as_int(
+            expected["Js"]
+        ):
+            failures.append(f"row {index} precision")
+        if _as_int(row["n_vars"]) != _as_int(expected["n_vars"]) or _as_int(
+            row["n_quad"]
+        ) != _as_int(expected["n_quad"]):
+            failures.append(f"row {index} dimensions")
+        observed_x = _x_values(row)
+        expected_x = cast(tuple[float, float, float, float], expected["x"])
+        for observed, target in zip(observed_x, expected_x):
+            if abs(observed - target) > 5e-6:
+                failures.append(f"row {index} x")
+                break
+        if not _objective_close(row["objective"], _as_float(expected["objective"])):
+            failures.append(f"row {index} objective")
+        if abs(_as_float(row["feasibility"]) - _as_float(expected["feasibility"])) > 5e-6:
+            failures.append(f"row {index} feasibility")
+    return _check_result(not failures, details={"failures": failures})
+
+
+def _check_table6(rows: list[dict[str, Any]]) -> dict[str, object]:
+    failures: list[str] = []
+    actions = tuple(str(row.get("action")) for row in rows)
+    if actions != expect.TABLE6_ACTIONS:
+        failures.append("action sequence")
+    if len(rows) >= 2:
+        for observed, target in zip(_x_values(rows[0]), expect.TABLE6_BASELINE_X):
+            if abs(observed - target) > 5e-9:
+                failures.append("baseline x")
+                break
+        for observed, target in zip(_x_values(rows[1]), expect.TABLE6_ACCEPTED_X):
+            if abs(observed - target) > 5e-9:
+                failures.append("accepted x")
+                break
+        if not _objective_close(rows[1]["objective"], expect.TABLE6_ACCEPTED_OBJECTIVE):
+            failures.append("accepted objective")
+    else:
+        failures.append("missing accepted row")
+    for index, row in enumerate(rows):
+        if _as_int(row["n_vars"]) != 46 or _as_int(row["n_quad"]) != 385:
+            failures.append(f"row {index} dimensions")
+        if abs(_as_float(row["feasibility"])) > 5e-9:
+            failures.append(f"row {index} feasibility")
+    return _check_result(not failures, details={"failures": failures})
+
+
+def _check_table9(rows: list[dict[str, Any]]) -> dict[str, object]:
+    comparisons = [expect.compare_table9_row(row) for row in rows]
+    observed_lambdas = {_as_float(row["lambda_input"]) for row in rows}
+    expected_lambdas = set(expect.TABLE9_BY_LAMBDA)
+    missing = sorted(expected_lambdas - observed_lambdas)
+    extra = sorted(observed_lambdas - expected_lambdas)
+    passed = (
+        not missing
+        and not extra
+        and len(rows) == len(expect.TABLE9)
+        and all(bool(row["passed"]) for row in comparisons)
+    )
+    exact = passed and all(bool(row["exact_reference_match"]) for row in comparisons)
+    stochastic = passed and all(
+        bool(row["exact_reference_match"]) or bool(row["within_stochastic_tolerance"])
+        for row in comparisons
+    )
+    status = (
+        "exact_reference_match"
+        if exact
+        else "within_documented_stochastic_tolerance"
+        if stochastic
+        else "failed"
+    )
+    return _check_result(
+        passed,
+        details={"rows": comparisons, "missing_lambdas": missing, "extra_lambdas": extra},
+        status=status,
+        exact=exact,
+    )
+
+
+def _check_nonlinear(rows: list[dict[str, Any]]) -> dict[str, object]:
+    failures: list[str] = []
+    lookup = {(_as_float(row["a"]), _as_float(row["J"])): row for row in rows}
+    for expected in expect.NONLINEAR:
+        key = (_as_float(expected["a"]), _as_float(expected["J"]))
+        row = lookup.get(key)
+        if row is None:
+            failures.append(f"missing {key}")
+            continue
+        for metric in ("max_abs_error", "rmse"):
+            if not _close(row[metric], _as_float(expected[metric]), 1e-12):
+                failures.append(f"{key} {metric}")
+    if len(rows) != len(expect.NONLINEAR):
+        failures.append("wrong row count")
+    return _check_result(not failures, details={"failures": failures})
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -295,7 +561,7 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--output", required=True)
     build.add_argument(
         "--format",
-        choices=["json", "csv", "coo", "npz", "dimod", "model"],
+        choices=["json", "csv", "coo", "npz", "dimod", "bqm", "model"],
         default=None,
     )
     build.add_argument("--rescale", type=float, default=None)
@@ -321,6 +587,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="all",
     )
     repro.add_argument("--output-dir", default="outputs/paper")
+    repro.add_argument("--strict", action="store_true")
     repro.set_defaults(func=_cmd_reproduce_paper)
     return parser
 

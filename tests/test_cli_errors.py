@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _run(args: list[str], cwd: Path, *, check: bool = True) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
@@ -82,10 +84,14 @@ def test_cli_errors_and_model_bundle(tmp_path: Path) -> None:
     assert '"decoded"' in solved.stdout
 
 
+@pytest.mark.slow
 def test_reproduce_paper_all_cli(tmp_path: Path) -> None:
     root = Path(__file__).resolve().parents[1]
     out_dir = tmp_path / "paper"
-    result = _run(["reproduce-paper", "--example", "all", "--output-dir", str(out_dir)], root)
+    result = _run(
+        ["reproduce-paper", "--example", "all", "--output-dir", str(out_dir), "--strict"],
+        root,
+    )
     assert "reproducibility_report.json" in result.stdout
     expected = {
         "ex1_unconstrained_bit_growth.csv",

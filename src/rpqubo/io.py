@@ -79,7 +79,7 @@ def export_qubo(qubo: QUBO, path: str | Path, fmt: str | None = None) -> None:
             offset=np.array([qubo.offset]),
         )
         return
-    if fmt == "dimod":
+    if fmt in {"dimod", "bqm"}:
         with path.open("wb") as f:
             f.write(qubo.to_dimod_bqm().to_file().read())
         return
@@ -133,13 +133,16 @@ def load_qubo(path: str | Path) -> QUBO:
     if suffix in {".dimod", ".bqm"}:
         import dimod
 
-        with path.open("rb") as f:
-            bqm = dimod.BinaryQuadraticModel.from_file(f)
+        with path.open("rb") as file:
+            bqm = dimod.BinaryQuadraticModel.from_file(file)
         return QUBO(
-            linear={str(k): float(v) for k, v in bqm.linear.items()},
-            quadratic={(str(u), str(v)): float(v) for (u, v), v in bqm.quadratic.items()},
+            linear={str(variable): float(bias) for variable, bias in bqm.linear.items()},
+            quadratic={
+                (min(str(u), str(v)), max(str(u), str(v))): float(bias)
+                for (u, v), bias in bqm.quadratic.items()
+            },
             offset=float(bqm.offset),
-            variable_order=[str(v) for v in bqm.variables],
+            variable_order=[str(variable) for variable in bqm.variables],
         )
     raise ValueError(f"Unsupported QUBO file type: {path}")
 
@@ -157,7 +160,7 @@ def _variable_to_mapping(var: Variable) -> dict[str, object]:
             "strict_bounds": var.strict_bounds,
         }
     if isinstance(var, SlackVar):
-        return {
+        data: dict[str, object] = {
             "name": var.name,
             "type": "slack",
             "lower": var.lower,
@@ -165,7 +168,10 @@ def _variable_to_mapping(var: Variable) -> dict[str, object]:
             "digits": var.digits,
             "encoding": var.encoding,
         }
-    return {
+        if var.ordering_penalty is not None:
+            data["ordering_penalty"] = var.ordering_penalty
+        return data
+    data = {
         "name": var.name,
         "type": "continuous",
         "lower": var.lower,
@@ -173,6 +179,9 @@ def _variable_to_mapping(var: Variable) -> dict[str, object]:
         "digits": var.digits,
         "encoding": var.encoding,
     }
+    if var.ordering_penalty is not None:
+        data["ordering_penalty"] = var.ordering_penalty
+    return data
 
 
 def _problem_to_mapping(problem: Problem) -> dict[str, object]:
@@ -257,6 +266,7 @@ def _variable_from_mapping(row: Mapping[str, Any]) -> Variable:
             float(row["upper"]),
             int(row.get("digits", 1)),
             str(row.get("encoding", "sbe")),
+            (None if row.get("ordering_penalty") is None else float(row["ordering_penalty"])),
         )
     return ContinuousVar(
         name,
@@ -264,6 +274,7 @@ def _variable_from_mapping(row: Mapping[str, Any]) -> Variable:
         float(row["upper"]),
         int(row.get("digits", 1)),
         str(row.get("encoding", "sbe")),
+        None if row.get("ordering_penalty") is None else float(row["ordering_penalty"]),
     )
 
 

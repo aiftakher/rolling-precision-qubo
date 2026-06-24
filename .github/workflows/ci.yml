@@ -24,10 +24,11 @@ jobs:
       - name: Mypy
         run: mypy src/rpqubo
       - name: Tests
-        run: pytest -q
+        run: pytest -q -m "not slow"
 
-  slow-reproducibility:
+  reference-reproducibility:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,8 +37,14 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -c requirements-lock.txt -e ".[dev]"
+          python -m pip check
       - name: Slow paper-reference tests
         run: pytest -q -m slow
       - name: Regenerate paper outputs
-        run: python -m rpqubo.cli reproduce-paper --example all --output-dir outputs/paper
+        run: rpqubo reproduce-paper --example all --output-dir outputs/paper --strict
+      - name: Upload paper outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-outputs
+          path: outputs/paper

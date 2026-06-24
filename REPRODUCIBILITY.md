@@ -3,11 +3,19 @@
 Paper outputs are regenerated with:
 
 ```bash
-rpqubo reproduce-paper --example all --output-dir outputs/paper
+rpqubo reproduce-paper --example all --output-dir outputs/paper --strict
 ```
 
 The command writes CSV files plus `reproducibility_report.json`, including git
 state, Python and dependency versions, and the configuration used by each table.
+`--strict` still writes all outputs, then exits nonzero if the report's
+`overall_passed` field is false.
+
+`outputs/paper/` is generated output and is ignored by Git except for
+`outputs/paper/.gitkeep`. CI regenerates the directory in the Python 3.10
+reference job and uploads it as a workflow artifact. Accepted reference data
+remains under `data/`, including the immutable Table 9 file
+`data/alan_penalty_sensitivity.csv`.
 
 Reference solver settings:
 
@@ -28,6 +36,10 @@ Important notes:
 - Seeded `neal` output is sensitive to BQM variable and interaction insertion
   order. The `paper_reference` layer preserves notebook/legacy construction
   order separately from the public builder.
+- Reproducibility reports separate `exact_reference_match` from
+  `within_documented_stochastic_tolerance`. A scientifically acceptable
+  stochastic Table 9 row is not reported as an exact match unless it is
+  numerically identical to the accepted CSV within strict tolerances.
 - The manuscript prose says Alan rolling penalties are all 500. The Table 6
   legacy code uses `{"e1": 200, "e2": 200, "link": 300, "card": 200}` with
   dynamic width scaling. Both modes are exposed; `paper_table6_reference`
@@ -37,7 +49,12 @@ Important notes:
 - Nonlinear cumulative-unary encoding is exact only for `J=1` on the one-digit
   grid. For `J>1`, the power representation is an approximation with recorded
   error.
+- Cumulative-unary ordering is enforced only when the model supplies a finite,
+  positive ordering penalty. The builder rejects cumulative-unary variables or
+  generated slacks that omit it.
 - Heuristic annealing does not certify global optimality, and runtime is not a
   regression-tested quantity.
-- In this checkout, the current local interpreter is Python 3.9.6 while package
-  metadata targets Python 3.10+. See `AUDIT.md` for the exact gate limitation.
+- The normal Python matrix runs fast API and mathematical checks with slow tests
+  excluded. The Python 3.10 reference job installs with
+  `requirements-lock.txt`, runs slow seeded-neal checks, regenerates
+  `outputs/paper`, and runs `rpqubo reproduce-paper --strict`.

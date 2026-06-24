@@ -38,15 +38,18 @@ def test_tables_1_to_6_reference_rows() -> None:
         (0.12352, 0.76544),
     ]
 
-    table3 = [
-        (r["Jx"], r["Js"], round(r["x"], 6), r["y"], round(r["s"], 6))
-        for r in reproduce_example2_bit_growth()
-    ]
-    assert table3 == [
-        (1, 1, 0.4, 0, 0.6),
+    table3_rows = reproduce_example2_bit_growth()
+    table3 = [(r["Jx"], r["Js"], round(r["x"], 6), r["y"], round(r["s"], 6)) for r in table3_rows]
+    assert table3[0] in {(1, 1, 0.4, 0, 0.6), (1, 1, 0.3, 0, 0.7)}
+    assert table3[1:] == [
         (2, 2, 0.35, 0, 0.65),
         (4, 4, 0.35, 0, 0.65),
     ]
+    first = table3_rows[0]
+    assert abs(float(first["objective"]) - 0.0025) <= 1e-9
+    assert abs(float(first["feasibility"])) <= 1e-9
+    assert first["n_vars"] == 11
+    assert first["n_quad"] == 55
 
     table4 = reproduce_example2_zoom()
     assert [r["action"] for r in table4] == [

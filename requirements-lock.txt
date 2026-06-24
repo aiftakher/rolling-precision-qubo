@@ -1,7 +1,8 @@
-# Reference constraints used for paper-output regeneration in this checkout.
-# Python reference interpreter observed locally: 3.9.6.
-# Package metadata supports Python >=3.10; regenerate this file on Python 3.10+
-# before release if hash-locked reproducibility is required.
+# Python 3.10 reference constraints for seeded paper-output regeneration.
+# The slow reproducibility CI job installs with:
+#   python -m pip install -c requirements-lock.txt -e ".[dev]"
+# These pins intentionally cover the exact/random/neal scope only; D-Wave
+# hardware and hybrid packages are not part of the supported release surface.
 dimod==0.12.21
 dwave-neal==0.6.0
 dwave-samplers==1.6.0

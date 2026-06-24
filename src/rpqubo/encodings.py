@@ -354,7 +354,7 @@ def nonlinear_error_table(exponents: list[float], digits_list: list[int]) -> lis
 
 
 def cumulative_unary_order_pairs(encoding: AffineEncoding) -> list[tuple[str, str]]:
-    """Return adjacent cumulative-unary pairs that must satisfy next <= current."""
+    """Return cumulative-unary pairs that must satisfy next <= current."""
 
     if encoding.encoding != "cumulative_unary":
         raise ValueError("ordering penalty requires a cumulative_unary encoding")
@@ -362,12 +362,12 @@ def cumulative_unary_order_pairs(encoding: AffineEncoding) -> list[tuple[str, st
     if not isinstance(digits_raw, int):
         raise ValueError("cumulative_unary encoding metadata must include integer digits")
     pairs: list[tuple[str, str]] = []
+    tail = f"cu_{encoding.name}_tail_J{digits_raw}"
     for digit in range(1, digits_raw + 1):
         bits = [cumulative_unary_bit_name(encoding.name, digit, index) for index in range(1, 10)]
         pairs.extend(zip(bits, bits[1:]))
-    tail = f"cu_{encoding.name}_tail_J{digits_raw}"
-    if tail in encoding.weights:
-        pairs.append((cumulative_unary_bit_name(encoding.name, digits_raw, 9), tail))
+        if tail in encoding.weights:
+            pairs.append((cumulative_unary_bit_name(encoding.name, digit, 9), tail))
     return pairs
 
 

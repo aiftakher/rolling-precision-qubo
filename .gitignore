@@ -9,3 +9,8 @@ dist/
 build/
 *.egg-info/
 tmp/
+__MACOSX/
+
+# Generated paper outputs are CI artifacts, not source data.
+outputs/paper/*
+!outputs/paper/.gitkeep

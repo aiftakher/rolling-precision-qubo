@@ -4,6 +4,12 @@ import csv
 from pathlib import Path
 
 from rpqubo.encodings import nonlinear_error_table
+from rpqubo.paper_expectations import (
+    TABLE9,
+    TABLE9_REFERENCE_SHA256,
+    load_table9_reference_csv,
+    reference_table9_sha256,
+)
 
 
 def test_paper_nonlinear_error_values_with_tolerance() -> None:
@@ -26,3 +32,8 @@ def test_alan_sensitivity_csv_schema_is_stable() -> None:
             "qubo_max_abs_unscaled",
             "qubo_dyn_range_unscaled",
         } <= set(reader.fieldnames or [])
+
+
+def test_table9_expectations_match_immutable_reference_csv() -> None:
+    assert reference_table9_sha256() == TABLE9_REFERENCE_SHA256
+    assert load_table9_reference_csv() == TABLE9

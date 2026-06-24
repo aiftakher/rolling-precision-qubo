@@ -36,6 +36,7 @@ class ContinuousVar:
     upper: float
     digits: int
     encoding: str = "sbe"
+    ordering_penalty: float | None = None
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -46,6 +47,15 @@ class ContinuousVar:
             raise ValueError(f"{self.name}: upper bound must be >= lower bound")
         if self.digits < 1:
             raise ValueError(f"{self.name}: digits must be >= 1")
+        if self.encoding == "cumulative_unary":
+            if self.ordering_penalty is None:
+                return
+            if not isfinite(self.ordering_penalty) or self.ordering_penalty <= 0.0:
+                raise ValueError(f"{self.name}: ordering_penalty must be finite and positive")
+        elif self.ordering_penalty is not None:
+            raise ValueError(
+                f"{self.name}: ordering_penalty is only supported for cumulative_unary"
+            )
 
 
 @dataclass(frozen=True)
@@ -90,6 +100,7 @@ class LinearConstraint:
     slack_digits: int = 1
     slack_encoding: str = "sbe"
     slack_type: str = "continuous"
+    slack_ordering_penalty: float | None = None
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -100,6 +111,15 @@ class LinearConstraint:
             raise ValueError(f"{self.name}: rhs must be finite")
         if not isfinite(self.penalty) or self.penalty <= 0.0:
             raise ValueError(f"{self.name}: penalty must be finite and positive")
+        if self.sense != "==" and self.slack_encoding == "cumulative_unary":
+            if self.slack_ordering_penalty is None:
+                return
+            if not isfinite(self.slack_ordering_penalty) or self.slack_ordering_penalty <= 0.0:
+                raise ValueError(f"{self.name}: slack_ordering_penalty must be finite and positive")
+        elif self.sense != "==" and self.slack_ordering_penalty is not None:
+            raise ValueError(
+                f"{self.name}: slack_ordering_penalty is only supported for cumulative_unary"
+            )
 
 
 @dataclass
@@ -187,6 +207,15 @@ class Problem:
                     )
             elif var.encoding not in {"sbe", "unary", "digit_sum_unary", "cumulative_unary"}:
                 raise ValueError(f"{var.name}: unsupported encoding {var.encoding!r}")
+            elif var.encoding == "cumulative_unary":
+                if var.ordering_penalty is None:
+                    raise ValueError(f"{var.name}: cumulative_unary requires ordering_penalty")
+                if not isfinite(var.ordering_penalty) or var.ordering_penalty <= 0.0:
+                    raise ValueError(f"{var.name}: ordering_penalty must be finite and positive")
+            elif var.ordering_penalty is not None:
+                raise ValueError(
+                    f"{var.name}: ordering_penalty is only supported for cumulative_unary"
+                )
 
         duplicates = sorted({name for name in names if names.count(name) > 1})
         if duplicates:
@@ -252,6 +281,23 @@ class Problem:
                 raise ValueError(f"{constraint.name}: slack upper bound must be finite")
             if constraint.slack_digits < 1:
                 raise ValueError(f"{constraint.name}: slack digits must be >= 1")
+            if constraint.sense != "==" and constraint.slack_encoding == "cumulative_unary":
+                if constraint.slack_ordering_penalty is None:
+                    raise ValueError(
+                        f"{constraint.name}: cumulative_unary slack requires slack_ordering_penalty"
+                    )
+                if (
+                    not isfinite(constraint.slack_ordering_penalty)
+                    or constraint.slack_ordering_penalty <= 0.0
+                ):
+                    raise ValueError(
+                        f"{constraint.name}: slack_ordering_penalty must be finite and positive"
+                    )
+            elif constraint.sense != "==" and constraint.slack_ordering_penalty is not None:
+                raise ValueError(
+                    f"{constraint.name}: slack_ordering_penalty is only supported for "
+                    "cumulative_unary"
+                )
             unknown = sorted(set(constraint.linear) - variable_names)
             if unknown:
                 raise ValueError(f"{constraint.name}: references unknown variables {unknown}")
@@ -272,9 +318,10 @@ class Problem:
                         raise ValueError(
                             f"{constraint.name}: integer slacks require explicit slack_upper"
                         )
-                    if float(constraint.slack_lower).is_integer() is False or float(
-                        upper
-                    ).is_integer() is False:
+                    if (
+                        float(constraint.slack_lower).is_integer() is False
+                        or float(upper).is_integer() is False
+                    ):
                         raise ValueError(
                             f"{constraint.name}: integer slack bounds must be integral"
                         )
@@ -293,6 +340,7 @@ class Problem:
                         upper,
                         constraint.slack_digits,
                         constraint.slack_encoding,
+                        constraint.slack_ordering_penalty,
                     )
                 enc = encode_variable(slack)
                 for bit in enc.bits:
@@ -332,6 +380,11 @@ class Problem:
                         upper=float(row["upper"]),
                         digits=int(row.get("digits", 1)),
                         encoding=str(row.get("encoding", "sbe")),
+                        ordering_penalty=(
+                            None
+                            if row.get("ordering_penalty") is None
+                            else float(row["ordering_penalty"])
+                        ),
                     )
                 )
             elif kind == "slack":
@@ -342,6 +395,11 @@ class Problem:
                         upper=float(row["upper"]),
                         digits=int(row.get("digits", 1)),
                         encoding=str(row.get("encoding", "sbe")),
+                        ordering_penalty=(
+                            None
+                            if row.get("ordering_penalty") is None
+                            else float(row["ordering_penalty"])
+                        ),
                     )
                 )
             else:
@@ -360,6 +418,11 @@ class Problem:
                 slack_digits=int(row.get("slack_digits", 1)),
                 slack_encoding=str(row.get("slack_encoding", "sbe")),
                 slack_type=str(row.get("slack_type", "continuous")),
+                slack_ordering_penalty=(
+                    None
+                    if row.get("slack_ordering_penalty") is None
+                    else float(row["slack_ordering_penalty"])
+                ),
             )
             for i, row in enumerate(data.get("constraints", []), start=1)
         ]

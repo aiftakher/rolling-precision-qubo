@@ -6,9 +6,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from math import fsum
 
-from .encodings import AffineEncoding, encode_variable
+from .encodings import (
+    AffineEncoding,
+    add_cumulative_unary_order_penalty,
+    encode_variable,
+)
 from .qubo import QUBO, add_affine, add_product_of_encodings, add_square_of_affine
 from .variables import (
+    ContinuousVar,
     IntegerVar,
     LinearConstraint,
     Problem,
@@ -47,10 +52,7 @@ class BuildResult:
         obj = self.problem.objective
         terms = [obj.constant]
         terms.extend(coeff * decoded[name] for name, coeff in obj.linear.items())
-        terms.extend(
-            coeff * decoded[u] * decoded[v]
-            for (u, v), coeff in obj.quadratic.items()
-        )
+        terms.extend(coeff * decoded[u] * decoded[v] for (u, v), coeff in obj.quadratic.items())
         return fsum(terms)
 
     def residuals(self, decoded: Mapping[str, float]) -> dict[str, float]:
@@ -136,6 +138,7 @@ def _make_slack(constraint: LinearConstraint, variables: Mapping[str, Variable])
         upper=upper,
         digits=constraint.slack_digits,
         encoding=constraint.slack_encoding,
+        ordering_penalty=constraint.slack_ordering_penalty,
     )
 
 
@@ -189,6 +192,15 @@ def build_qubo(problem: Problem, *, rescale: float | None = None) -> BuildResult
         constraints=problem.constraints,
     )
     result = BuildResult(problem=expanded_problem, qubo=qubo, encodings=encodings)
+    for var in variables:
+        encoding = encodings[var.name]
+        if encoding.encoding == "cumulative_unary":
+            if not isinstance(var, (ContinuousVar, SlackVar)):
+                raise ValueError(f"{var.name}: cumulative_unary is only valid for grid variables")
+            strength = getattr(var, "ordering_penalty", None)
+            if strength is None:
+                raise ValueError(f"{var.name}: cumulative_unary requires ordering_penalty")
+            add_cumulative_unary_order_penalty(qubo, encoding, float(strength))
     _add_objective(result)
 
     for constraint in problem.constraints:
