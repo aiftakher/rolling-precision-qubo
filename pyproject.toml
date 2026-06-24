@@ -7,8 +7,8 @@ name = "rolling-precision-qubo"
 version = "0.1.0"
 description = "Encode bounded mixed-integer problems as QUBO and reproduce rolling-precision QUBO paper examples."
 readme = "README.md"
-requires-python = ">=3.9"
-license = {text = "MIT"}
+requires-python = ">=3.10"
+license = "MIT"
 authors = [{name = "Ashfaq Iftakher"}]
 keywords = ["QUBO", "mixed-integer optimization", "D-Wave", "simulated annealing"]
 dependencies = [
@@ -19,14 +19,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dwave = [
-  "dwave-system>=1.25",
-  "dwave-hybrid>=0.6",
-]
 dev = [
-  "pytest>=8",
-  "ruff>=0.5",
-  "mypy>=1.10",
+  "build>=1.2,<2",
+  "pytest>=8,<9",
+  "ruff>=0.15,<0.16",
+  "mypy>=1.19,<1.20",
 ]
 
 [project.scripts]
@@ -37,17 +34,21 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 extend-exclude = ["legacy", "notebooks", "papers", "data", "tmp"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+ignore = ["B905", "UP007"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 packages = ["rpqubo"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+  "slow: seeded paper-reference and sensitivity regeneration tests",
+]

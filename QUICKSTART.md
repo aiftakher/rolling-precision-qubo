@@ -1,37 +1,24 @@
 # Quickstart
 
-Encode a variable:
+Encode an integer variable. Integer variables default to bounded binary
+encoding.
 
 ```bash
-rpqubo encode-variable --name x --type continuous --lower 2 --upper 5 --digits 3 --encoding sbe
+rpqubo encode-variable --name i --type integer --lower 0 --upper 3
 ```
 
-Create `problem.json`:
-
-```json
-{
-  "name": "tiny",
-  "variables": [
-    {"name": "x", "type": "continuous", "lower": 0, "upper": 1, "digits": 1}
-  ],
-  "objective": {
-    "constant": 0.1225,
-    "linear": {"x": -0.7},
-    "quadratic": [{"vars": ["x", "x"], "coef": 1.0}]
-  }
-}
-```
-
-Build, inspect, and solve:
+Build, solve, and decode a small structured problem:
 
 ```bash
-rpqubo build-qubo problem.json --output tiny_qubo.json
-rpqubo inspect-qubo tiny_qubo.json
-rpqubo solve tiny_qubo.json --solver exact
+rpqubo build-qubo problem.json --output model.model --format model
+rpqubo solve model.model --solver exact
 ```
 
-Reproduce paper Example 1:
+Regenerate the paper outputs:
 
 ```bash
-rpqubo reproduce-paper --example ex1 --output-dir outputs/paper
+rpqubo reproduce-paper --example all --output-dir outputs/paper
 ```
+
+The generated report records dependency versions, git state, solver settings,
+and the known Alan Table 6 manuscript/code penalty discrepancy.

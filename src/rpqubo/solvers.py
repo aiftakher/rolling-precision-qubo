@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from importlib import metadata as importlib_metadata
 from itertools import product
+from math import isfinite
 from random import Random
 from typing import Any, cast
 
@@ -19,8 +21,44 @@ class SolveResult:
     metadata: dict[str, object] = field(default_factory=dict)
 
 
+def _package_versions() -> dict[str, str]:
+    versions: dict[str, str] = {}
+    for package in ("dimod", "dwave-neal", "dwave-samplers", "numpy"):
+        try:
+            versions[package] = importlib_metadata.version(package)
+        except importlib_metadata.PackageNotFoundError:
+            continue
+    return versions
+
+
+def _ordered_variables(qubo: QUBO) -> list[str]:
+    return qubo.ordered_variables
+
+
+def _positive_int(value: int, name: str) -> int:
+    value = int(value)
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _finite_positive_float(value: float, name: str) -> float:
+    value = float(value)
+    if not isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return value
+
+
+def _base_metadata(qubo: QUBO) -> dict[str, object]:
+    return {
+        "package_versions": _package_versions(),
+        "bqm_variable_order": _ordered_variables(qubo),
+    }
+
+
 def solve_exact(qubo: QUBO, *, max_variables: int = 24) -> SolveResult:
-    variables = sorted(qubo.variables)
+    max_variables = _positive_int(max_variables, "max_variables")
+    variables = _ordered_variables(qubo)
     if len(variables) > max_variables:
         raise ValueError(
             f"Exact enumeration requested for {len(variables)} variables; limit is {max_variables}"
@@ -37,12 +75,13 @@ def solve_exact(qubo: QUBO, *, max_variables: int = 24) -> SolveResult:
         sample=best_sample,
         energy=best_energy,
         solver="exact",
-        metadata={"num_evaluated": 2 ** len(variables)},
+        metadata={**_base_metadata(qubo), "num_evaluated": 2 ** len(variables)},
     )
 
 
 def solve_random(qubo: QUBO, *, num_reads: int = 1000, seed: int | None = None) -> SolveResult:
-    variables = sorted(qubo.variables)
+    num_reads = _positive_int(num_reads, "num_reads")
+    variables = _ordered_variables(qubo)
     rng = Random(seed)
     best_energy = float("inf")
     best_sample: dict[str, int] = {}
@@ -56,7 +95,7 @@ def solve_random(qubo: QUBO, *, num_reads: int = 1000, seed: int | None = None) 
         sample=best_sample,
         energy=best_energy,
         solver="random",
-        metadata={"num_reads": num_reads, "seed": seed},
+        metadata={**_base_metadata(qubo), "num_reads": num_reads, "seed": seed},
     )
 
 
@@ -67,25 +106,27 @@ def solve_neal(
     sweeps: int = 2500,
     seed: int | None = None,
 ) -> SolveResult:
+    num_reads = _positive_int(num_reads, "num_reads")
+    sweeps = _positive_int(sweeps, "sweeps")
     try:
         from neal import SimulatedAnnealingSampler
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("dwave-neal is required for solver='neal'") from exc
     sampler = SimulatedAnnealingSampler()
-    sampleset = sampler.sample(qubo.to_dimod_bqm(), num_reads=num_reads, sweeps=sweeps, seed=seed)
+    bqm = qubo.to_dimod_bqm()
+    sampleset = sampler.sample(bqm, num_reads=num_reads, sweeps=sweeps, seed=seed)
     best = sampleset.first
     return SolveResult(
         sample={str(k): int(v) for k, v in dict(best.sample).items()},
         energy=float(best.energy),
         solver="neal",
-        metadata={"num_reads": num_reads, "sweeps": sweeps, "seed": seed},
-    )
-
-
-def solve_dwave_placeholder(qubo: QUBO, **_: object) -> SolveResult:
-    raise RuntimeError(
-        "D-Wave hardware/hybrid backends are optional. Install the dwave extra "
-        "and configure credentials through the standard D-Wave environment or config."
+        metadata={
+            **_base_metadata(qubo),
+            "num_reads": num_reads,
+            "sweeps": sweeps,
+            "seed": seed,
+            "neal_variable_order": [str(v) for v in bqm.variables],
+        },
     )
 
 
@@ -115,8 +156,6 @@ def solve_qubo(qubo: QUBO, solver: str = "exact", **options: object) -> SolveRes
             sweeps=_int_option(options, "sweeps", 2500),
             seed=_seed_option(options),
         )
-    if solver in {"dwave-hybrid", "dwave-hardware", "dwave"}:
-        return solve_dwave_placeholder(qubo, **options)
     raise ValueError(f"Unknown solver {solver!r}")
 
 

@@ -1,58 +1,43 @@
 # Reproducibility
 
-The original paper examples use D-Wave `neal` simulated annealing. These runs
-are stochastic and depend on package versions, seed handling, and hardware
-runtime. They should be treated as regression checks with tolerances, not
-certificates of global optimality.
+Paper outputs are regenerated with:
 
-Searchable audit anchors came from `papers/clean-manuscript-R3.pdf`.
-`papers/galley-proof.pdf` did not produce searchable text with `pdftotext` in
-this environment.
+```bash
+rpqubo reproduce-paper --example all --output-dir outputs/paper
+```
 
-## Solver Settings
+The command writes CSV files plus `reproducibility_report.json`, including git
+state, Python and dependency versions, and the configuration used by each table.
 
-The manuscript numerical section states:
+Reference solver settings:
 
-- solver: D-Wave `neal`
-- `num_reads = 200`
-- `num_sweeps = 2500`
-- `seed = 11`
+- Example 1 bit growth: `neal`, `num_reads=200`, `sweeps=2500`, `seed=11`.
+- Example 1 zoom: `neal`, `num_reads=300`, `sweeps=4000`, `seed=11`.
+- Example 2 bit growth: `neal`, `num_reads=200`, `sweeps=2500`, `seed=13`.
+- Example 2 zoom: `neal`, `num_reads=300`, `sweeps=4000`, `seed=13`, dynamic
+  penalties, target max coefficient 10.
+- Alan bit growth: `neal`, `num_reads=300`, `sweeps=3000`, `seed=7`, SBE
+  cardinality slack.
+- Alan Table 6 zoom: `neal`, `num_reads=300`, `sweeps=4000`, `seed=13`, integer
+  cardinality slack, dynamic penalties, target max coefficient 10.
+- Alan Table 9 sensitivity: `neal`, `num_reads=300`, `sweeps=4000`, `seed=13`,
+  fixed penalty per run, integer cardinality slack, zoom enabled.
 
-Legacy artifacts are not fully consistent with that global statement:
+Important notes:
 
-- `notebooks/ex1.ipynb`: 200 reads, 2500 sweeps, seed 11.
-- `notebooks/ex3.ipynb`: 200 reads, 2500 sweeps, seed 13.
-- `notebooks/ex4.ipynb`: 300 reads, 3000 sweeps, seed 7.
-- zoom scripts: commonly 300 reads, 4000 sweeps, seed 13.
-
-These mismatches are documented in `AUDIT.md`.
-
-## Deterministic Checks
-
-Use exact enumeration for:
-
-- SBE grid representability and bounds.
-- Integer encoding coverage.
-- QUBO algebra expansion on small bit sets.
-- Rosenberg quadratization on small pseudo-Boolean polynomials.
-- Example 1 at small `J`.
-- Example 2 at `J=2`, where the exact optimum is representable.
-
-## Stochastic Checks
-
-Use fixed seeds and tolerances for:
-
-- high-precision Example 1 with `neal`;
-- Alan bit-growth and zoom;
-- Alan penalty sensitivity.
-
-Runtime values are hardware-dependent and should not be strict regression
-targets.
-
-## Known Difference
-
-Example 2 at `J=1` has multiple grid solutions with the same objective under
-exact enumeration. The paper table reports `x=0.4, s=0.6`; exact enumeration in
-this package may return `x=0.3, s=0.7` unless a tie-breaker or stochastic solver
-selects the other representative. Both have objective `2.5e-3` and zero
-constraint residual.
+- Seeded `neal` output is sensitive to BQM variable and interaction insertion
+  order. The `paper_reference` layer preserves notebook/legacy construction
+  order separately from the public builder.
+- The manuscript prose says Alan rolling penalties are all 500. The Table 6
+  legacy code uses `{"e1": 200, "e2": 200, "link": 300, "card": 200}` with
+  dynamic width scaling. Both modes are exposed; `paper_table6_reference`
+  reproduces the table and `manuscript_uniform_500` follows the prose.
+- Alan Table 5 uses SBE cardinality slack. Tables 6 and 9 use the two-bit
+  integer cardinality slack `sc = sc0 + 2*sc1`.
+- Nonlinear cumulative-unary encoding is exact only for `J=1` on the one-digit
+  grid. For `J>1`, the power representation is an approximation with recorded
+  error.
+- Heuristic annealing does not certify global optimality, and runtime is not a
+  regression-tested quantity.
+- In this checkout, the current local interpreter is Python 3.9.6 while package
+  metadata targets Python 3.10+. See `AUDIT.md` for the exact gate limitation.

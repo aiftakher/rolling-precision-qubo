@@ -1,7 +1,15 @@
-# Minimal reproducibility environment used during package creation.
-# Regenerate with your preferred resolver before release if exact hashes are required.
+# Reference constraints used for paper-output regeneration in this checkout.
+# Python reference interpreter observed locally: 3.9.6.
+# Package metadata supports Python >=3.10; regenerate this file on Python 3.10+
+# before release if hash-locked reproducibility is required.
 dimod==0.12.21
-dwave-neal
+dwave-neal==0.6.0
+dwave-samplers==1.6.0
+networkx==3.2.1
 numpy==1.26.4
 PyYAML==6.0.2
-sympy==1.13.3
+pytest==8.4.2
+ruff==0.15.19
+mypy==1.19.1
+build==1.4.4
+pyproject_hooks==1.2.0

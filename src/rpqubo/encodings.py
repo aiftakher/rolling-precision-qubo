@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from itertools import product
-from math import sqrt
+from math import isfinite, sqrt
+from typing import Any
 
 from .variables import BinaryVar, IntegerVar, SlackVar, Variable
 
@@ -81,6 +82,24 @@ class AffineEncoding:
             "grid": self.grid_summary(),
             "metadata": self.metadata,
         }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> AffineEncoding:
+        bounds = data.get("bounds", {})
+        if not isinstance(bounds, Mapping):
+            raise ValueError("encoding bounds must be a mapping")
+        bits = data.get("binary_variables", data.get("bits", []))
+        return cls(
+            name=str(data["name"]),
+            offset=float(data["offset"]),
+            weights={str(k): float(v) for k, v in dict(data["weights"]).items()},
+            lower=float(bounds.get("lower", data.get("lower", 0.0))),
+            upper=float(bounds.get("upper", data.get("upper", 1.0))),
+            kind=str(data["kind"]),
+            encoding=str(data["encoding"]),
+            bits=[str(bit) for bit in bits],
+            metadata=dict(data.get("metadata", {})),
+        )
 
 
 def sbe_bit_name(name: str, digit: int, index: int) -> str:
@@ -332,3 +351,74 @@ def nonlinear_error_table(exponents: list[float], digits_list: list[int]) -> lis
                 }
             )
     return rows
+
+
+def cumulative_unary_order_pairs(encoding: AffineEncoding) -> list[tuple[str, str]]:
+    """Return adjacent cumulative-unary pairs that must satisfy next <= current."""
+
+    if encoding.encoding != "cumulative_unary":
+        raise ValueError("ordering penalty requires a cumulative_unary encoding")
+    digits_raw = encoding.metadata.get("digits")
+    if not isinstance(digits_raw, int):
+        raise ValueError("cumulative_unary encoding metadata must include integer digits")
+    pairs: list[tuple[str, str]] = []
+    for digit in range(1, digits_raw + 1):
+        bits = [cumulative_unary_bit_name(encoding.name, digit, index) for index in range(1, 10)]
+        pairs.extend(zip(bits, bits[1:]))
+    tail = f"cu_{encoding.name}_tail_J{digits_raw}"
+    if tail in encoding.weights:
+        pairs.append((cumulative_unary_bit_name(encoding.name, digits_raw, 9), tail))
+    return pairs
+
+
+def add_cumulative_unary_order_penalty(
+    qubo: Any,
+    encoding: AffineEncoding,
+    lambda_order: float,
+) -> None:
+    """Add lambda * sum(z_next - z_current*z_next) for illegal unary transitions."""
+
+    if not isfinite(lambda_order) or lambda_order <= 0.0:
+        raise ValueError("lambda_order must be finite and positive")
+    for current, next_bit in cumulative_unary_order_pairs(encoding):
+        qubo.add_linear(next_bit, lambda_order)
+        qubo.add_quadratic(current, next_bit, -lambda_order)
+
+
+def add_nonlinear_surrogate(
+    qubo: Any,
+    encoding: AffineEncoding,
+    exponent: float,
+    *,
+    lambda_order: float,
+) -> None:
+    """Add the paper's cumulative-unary power surrogate and ordering penalty."""
+
+    if encoding.encoding != "cumulative_unary":
+        raise ValueError("nonlinear surrogate requires cumulative_unary encoding")
+    if encoding.lower != 0.0 or encoding.upper != 1.0:
+        raise ValueError("nonlinear surrogate currently supports encodings on [0, 1]")
+    if not isfinite(exponent):
+        raise ValueError("exponent must be finite")
+
+    add_cumulative_unary_order_penalty(qubo, encoding, lambda_order)
+    digits_raw = encoding.metadata.get("digits")
+    if not isinstance(digits_raw, int):
+        raise ValueError("encoding metadata must include integer digits")
+    coeffs, endpoint_coeff = nonlinear_coefficients(digits_raw, exponent)
+    for row in coeffs:
+        bit = cumulative_unary_bit_name(encoding.name, int(row["digit"]), int(row["index"]))
+        qubo.add_linear(bit, row["coefficient"])
+    qubo.add_linear(f"cu_{encoding.name}_tail_J{digits_raw}", endpoint_coeff)
+    qubo.metadata.setdefault("nonlinear_surrogates", [])
+    surrogates = qubo.metadata["nonlinear_surrogates"]
+    if isinstance(surrogates, list):
+        surrogates.append(
+            {
+                "variable": encoding.name,
+                "exponent": exponent,
+                "digits": digits_raw,
+                "exact": digits_raw == 1,
+                "lambda_order": lambda_order,
+            }
+        )

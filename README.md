@@ -7,25 +7,19 @@ for:
 > Solving Mixed-Integer Problems as QUBO: Encodings, Reformulations, and
 > Rolling-precision Algorithm
 
-QUBO models are binary quadratic objectives. They can be solved by classical
-exact enumeration for tiny cases, simulated annealing through D-Wave `neal`, or
-optional D-Wave hardware/hybrid backends when credentials are configured.
-Heuristic annealing does not certify global optimality.
+QUBO models are binary quadratic objectives. This package supports exact
+enumeration for tiny verification cases, a random debugging baseline, and
+simulated annealing through D-Wave `neal`. It does not implement or advertise
+D-Wave hardware or hybrid execution. Heuristic annealing does not certify global
+optimality.
 
 ## Install
 
 ```bash
-python -m pip install -e .
+python -m pip install -e ".[dev]"
 ```
 
-Optional D-Wave hardware support:
-
-```bash
-python -m pip install -e ".[dwave]"
-```
-
-D-Wave credentials are never required for normal installation. Hardware access
-uses standard D-Wave environment variables or config files.
+Python 3.10 or newer is the supported package target.
 
 ## Quickstart
 
@@ -69,16 +63,16 @@ rpqubo reproduce-paper --example ex1 --output-dir outputs/paper
 - Explicit slack-variable reformulation for inequalities.
 - Sparse QUBO object with linear terms, quadratic terms, offset, and groups.
 - JSON, CSV/COO, NumPy NPZ, and dimod BQM export.
+- Reloadable model bundles with QUBO, encodings, constraints, and metadata.
 - Exact, random, and `neal` solver adapters.
-- Reproducible paper example scripts under `examples/paper/`.
+- Reproducible paper examples through `rpqubo reproduce-paper`.
 
 ## Repository Layout
 
 - `src/rpqubo/`: package implementation.
-- `examples/paper/`: scripts that reproduce paper examples through the package.
 - `tests/`: pytest suite.
 - `legacy/` and `notebooks/`: original research artifacts retained for traceability.
-- `papers/`: manuscript/proof PDFs.
+- `outputs/paper/`: generated reference CSV/JSON outputs.
 
 ## Citation
 

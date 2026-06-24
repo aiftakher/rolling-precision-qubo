@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from math import fsum
 
 from .encodings import AffineEncoding, encode_variable
 from .qubo import QUBO, add_affine, add_product_of_encodings, add_square_of_affine
@@ -34,6 +35,8 @@ class BuildResult:
     qubo: QUBO
     encodings: dict[str, AffineEncoding]
     constraints: list[ConstraintBuildInfo] = field(default_factory=list)
+    unscaled_qubo: QUBO | None = None
+    rescale_factor: float = 1.0
 
     def decode_sample(
         self, sample: Mapping[str, int], *, validate: bool = True
@@ -42,12 +45,13 @@ class BuildResult:
 
     def objective_value(self, decoded: Mapping[str, float]) -> float:
         obj = self.problem.objective
-        value = obj.constant
-        for name, coeff in obj.linear.items():
-            value += coeff * decoded[name]
-        for (u, v), coeff in obj.quadratic.items():
-            value += coeff * decoded[u] * decoded[v]
-        return value
+        terms = [obj.constant]
+        terms.extend(coeff * decoded[name] for name, coeff in obj.linear.items())
+        terms.extend(
+            coeff * decoded[u] * decoded[v]
+            for (u, v), coeff in obj.quadratic.items()
+        )
+        return fsum(terms)
 
     def residuals(self, decoded: Mapping[str, float]) -> dict[str, float]:
         values: dict[str, float] = {}
@@ -158,6 +162,10 @@ def _constraint_residual_affine(
 
 
 def build_qubo(problem: Problem, *, rescale: float | None = None) -> BuildResult:
+    problem.validate()
+    if rescale is not None and rescale <= 0.0:
+        raise ValueError("rescale must be strictly positive")
+
     variables = list(problem.variables)
     variable_map = problem.variable_map
     generated_slacks: list[Variable] = []
@@ -169,7 +177,11 @@ def build_qubo(problem: Problem, *, rescale: float | None = None) -> BuildResult
     variables.extend(generated_slacks)
 
     encodings = {var.name: encode_variable(var) for var in variables}
-    qubo = QUBO(variable_groups={name: enc.bits for name, enc in encodings.items()})
+    variable_order = [bit for var in variables for bit in encodings[var.name].bits]
+    qubo = QUBO(
+        variable_groups={name: enc.bits for name, enc in encodings.items()},
+        variable_order=variable_order,
+    )
     expanded_problem = Problem(
         name=problem.name,
         variables=variables,
@@ -199,8 +211,9 @@ def build_qubo(problem: Problem, *, rescale: float | None = None) -> BuildResult
     if rescale is not None:
         from .qubo import rescaled_qubo
 
-        result.qubo, factor = rescaled_qubo(result.qubo, target_max_abs=rescale)
-        result.qubo.metadata["rescale_factor"] = factor
+        result.unscaled_qubo = result.qubo.copy()
+        result.qubo, factor = rescaled_qubo(result.unscaled_qubo, target_max_abs=rescale)
+        result.rescale_factor = factor
     return result
 
 

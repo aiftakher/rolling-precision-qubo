@@ -1,46 +1,25 @@
 # API Reference
 
-Main imports:
+Implemented scope for v0.1:
 
-```python
-from rpqubo import (
-    BinaryVar,
-    ContinuousVar,
-    IntegerVar,
-    SlackVar,
-    build_qubo,
-    encode_variable,
-    export_qubo,
-    load_qubo,
-    solve_qubo,
-)
-```
+- bounded binary, integer, continuous, and slack variables;
+- bounded quadratic objectives;
+- linear equality and inequality constraints through quadratic penalties;
+- SBE, unary, cumulative-unary, and bounded integer encodings;
+- rolling precision and anchored zoom helpers;
+- exact, random, and `neal` solvers;
+- JSON/CSV/NPZ/dimod QUBO export plus reloadable model bundles.
 
-Variable specs:
+Key entry points:
 
-- `ContinuousVar(name, lower, upper, digits, encoding="sbe")`
-- `IntegerVar(name, lower, upper, encoding="binary", strict_bounds=True)`
-- `BinaryVar(name)`
-- `SlackVar(name, lower, upper, digits, encoding="sbe")`
+- `rpqubo.variables.Problem.validate()` validates structured inputs before build.
+- `rpqubo.builders.build_qubo()` returns `BuildResult` with `qubo`,
+  `unscaled_qubo`, `rescale_factor`, encodings, and constraint diagnostics.
+- `rpqubo.solvers.solve_qubo()` supports `exact`, `random`, and `neal`.
+- `rpqubo.io.export_model()` and `rpqubo.io.load_model()` preserve encodings so
+  reloaded models can be solved and decoded without rebuilding the source
+  problem.
+- `rpqubo.examples.reproduce_*()` regenerates paper-reference examples by
+  constructing and solving QUBOs.
 
-QUBO build:
-
-- `build_qubo(problem, rescale=None)` returns a `BuildResult`.
-- `BuildResult.qubo` contains `linear`, `quadratic`, `offset`, and
-  `variable_groups`.
-- `BuildResult.decode_sample(sample)` maps binary samples back to original
-  variables.
-- `BuildResult.objective_value(decoded)` evaluates the original objective.
-- `BuildResult.feasibility(decoded)` returns max residual/violation.
-
-Solvers:
-
-- `solve_qubo(qubo, solver="exact")`
-- `solve_qubo(qubo, solver="neal", num_reads=200, sweeps=2500, seed=11)`
-- `solve_qubo(qubo, solver="random", num_reads=1000, seed=1)`
-
-Exports:
-
-- `export_qubo(qubo, "model.json")`
-- `export_qubo(qubo, "model.csv", fmt="csv")`
-- `export_qubo(qubo, "model.npz", fmt="npz")`
+The package does not claim arbitrary MIQCQP or geometric-program support.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from math import fsum, isfinite
 from typing import Any
 
 from .encodings import AffineEncoding
@@ -18,36 +19,91 @@ class QUBO:
     offset: float = 0.0
     variable_groups: dict[str, list[str]] = field(default_factory=dict)
     metadata: dict[str, object] = field(default_factory=dict)
+    variable_order: list[str] = field(default_factory=list)
+
+    def copy(self) -> QUBO:
+        """Return an independent copy preserving metadata and ordering."""
+
+        return QUBO(
+            linear=dict(self.linear),
+            quadratic=dict(self.quadratic),
+            offset=self.offset,
+            variable_groups={name: list(bits) for name, bits in self.variable_groups.items()},
+            metadata=dict(self.metadata),
+            variable_order=list(self.variable_order),
+        )
 
     def add_linear(self, var: str, coeff: float) -> None:
-        if abs(coeff) <= 0.0:
+        coeff = float(coeff)
+        if not isfinite(coeff):
+            raise ValueError(f"Non-finite linear coefficient for {var!r}: {coeff}")
+        if coeff == 0.0:
             return
-        self.linear[var] = self.linear.get(var, 0.0) + coeff
-        if abs(self.linear[var]) < 1e-15:
-            del self.linear[var]
+
+        value = fsum((self.linear.get(var, 0.0), coeff))
+        if value == 0.0:
+            self.linear.pop(var, None)
+        else:
+            self.linear[var] = value
 
     def add_quadratic(self, u: str, v: str, coeff: float) -> None:
-        if abs(coeff) <= 0.0:
+        coeff = float(coeff)
+        if not isfinite(coeff):
+            raise ValueError(f"Non-finite quadratic coefficient ({u!r}, {v!r}): {coeff}")
+        if coeff == 0.0:
             return
         if u == v:
             self.add_linear(u, coeff)
             return
-        a, b = (u, v) if u < v else (v, u)
-        key = (a, b)
-        self.quadratic[key] = self.quadratic.get(key, 0.0) + coeff
-        if abs(self.quadratic[key]) < 1e-15:
-            del self.quadratic[key]
+
+        key: tuple[str, str] = (u, v) if u <= v else (v, u)
+        value = fsum((self.quadratic.get(key, 0.0), coeff))
+        if value == 0.0:
+            self.quadratic.pop(key, None)
+        else:
+            self.quadratic[key] = value
+
+    def prune(self, tolerance: float) -> None:
+        if tolerance < 0:
+            raise ValueError("tolerance must be nonnegative")
+        self.linear = {
+            key: value for key, value in self.linear.items()
+            if abs(value) > tolerance
+        }
+        self.quadratic = {
+            key: value for key, value in self.quadratic.items()
+            if abs(value) > tolerance
+        }
 
     def add_offset(self, coeff: float) -> None:
-        self.offset += coeff
+        coeff = float(coeff)
+        if not isfinite(coeff):
+            raise ValueError(f"Non-finite offset coefficient: {coeff}")
+        self.offset = fsum((self.offset, coeff))
 
     @property
     def variables(self) -> set[str]:
-        vars_ = set(self.linear)
+        variables = set(self.variable_order)
+        variables.update(self.linear)
         for u, v in self.quadratic:
-            vars_.add(u)
-            vars_.add(v)
-        return vars_
+            variables.update((u, v))
+        for group in self.variable_groups.values():
+            variables.update(group)
+        return variables
+
+    @property
+    def ordered_variables(self) -> list[str]:
+        """Return explicit order first, then remaining labels deterministically."""
+
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for var in self.variable_order:
+            if var not in seen:
+                ordered.append(var)
+                seen.add(var)
+        for var in sorted(self.variables - seen):
+            ordered.append(var)
+        return ordered
 
     def energy(self, sample: Mapping[str, int]) -> float:
         total = self.offset
@@ -62,9 +118,12 @@ class QUBO:
             import dimod
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError("dimod is required for BQM conversion") from exc
-        return dimod.BinaryQuadraticModel(
-            self.linear, self.quadratic, self.offset, vartype=dimod.BINARY
-        )
+        bqm = dimod.BinaryQuadraticModel({}, {}, self.offset, vartype=dimod.BINARY)
+        for var in self.ordered_variables:
+            bqm.add_variable(var, self.linear.get(var, 0.0))
+        for (u, v), bias in self.quadratic.items():
+            bqm.add_interaction(u, v, bias)
+        return bqm
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -75,6 +134,7 @@ class QUBO:
             "offset": self.offset,
             "variable_groups": self.variable_groups,
             "metadata": self.metadata,
+            "variable_order": self.variable_order,
         }
 
     @classmethod
@@ -97,6 +157,7 @@ class QUBO:
                 for k, v in dict(data.get("variable_groups", {})).items()
             },
             metadata=dict(data.get("metadata", {})),
+            variable_order=[str(x) for x in data.get("variable_order", [])],
         )
 
 
@@ -178,17 +239,23 @@ def coefficient_stats(qubo: QUBO, include_offset: bool = False) -> dict[str, flo
     }
 
 
-def rescaled_qubo(qubo: QUBO, target_max_abs: float = 10.0) -> tuple[QUBO, float]:
-    stats = coefficient_stats(qubo, include_offset=False)
+def rescaled_qubo(
+    qubo: QUBO,
+    target_max_abs: float = 10.0,
+    *,
+    include_offset: bool = False,
+) -> tuple[QUBO, float]:
+    if not isfinite(target_max_abs) or target_max_abs <= 0.0:
+        raise ValueError("target_max_abs must be finite and strictly positive")
+    stats = coefficient_stats(qubo, include_offset=include_offset)
     max_abs = stats["max_abs"]
+    scaled = qubo.copy()
     if max_abs == 0.0 or max_abs <= target_max_abs:
-        return qubo, 1.0
+        scaled.metadata["rescale_factor"] = 1.0
+        return scaled, 1.0
     factor = max_abs / target_max_abs
-    scaled = QUBO(
-        linear={k: v / factor for k, v in qubo.linear.items()},
-        quadratic={k: v / factor for k, v in qubo.quadratic.items()},
-        offset=qubo.offset / factor,
-        variable_groups={k: list(v) for k, v in qubo.variable_groups.items()},
-        metadata={**qubo.metadata, "rescale_factor": factor},
-    )
+    scaled.linear = {k: v / factor for k, v in scaled.linear.items()}
+    scaled.quadratic = {k: v / factor for k, v in scaled.quadratic.items()}
+    scaled.offset /= factor
+    scaled.metadata["rescale_factor"] = factor
     return scaled, factor

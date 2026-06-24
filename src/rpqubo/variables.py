@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from math import isfinite
 from typing import Any, Union
 
 
@@ -12,6 +13,10 @@ class BinaryVar:
     """Native binary variable."""
 
     name: str
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("binary variable name must be nonempty")
 
     @property
     def lower(self) -> int:
@@ -33,6 +38,10 @@ class ContinuousVar:
     encoding: str = "sbe"
 
     def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("continuous variable name must be nonempty")
+        if not isfinite(self.lower) or not isfinite(self.upper):
+            raise ValueError(f"{self.name}: bounds must be finite")
         if self.upper < self.lower:
             raise ValueError(f"{self.name}: upper bound must be >= lower bound")
         if self.digits < 1:
@@ -57,6 +66,8 @@ class IntegerVar:
     strict_bounds: bool = True
 
     def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("integer variable name must be nonempty")
         if self.upper < self.lower:
             raise ValueError(f"{self.name}: upper bound must be >= lower bound")
 
@@ -81,10 +92,14 @@ class LinearConstraint:
     slack_type: str = "continuous"
 
     def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("constraint name must be nonempty")
         if self.sense not in {"<=", ">=", "=="}:
             raise ValueError(f"{self.name}: unsupported sense {self.sense!r}")
-        if self.penalty < 0:
-            raise ValueError(f"{self.name}: penalty must be nonnegative")
+        if not isfinite(self.rhs):
+            raise ValueError(f"{self.name}: rhs must be finite")
+        if not isfinite(self.penalty) or self.penalty <= 0.0:
+            raise ValueError(f"{self.name}: penalty must be finite and positive")
 
 
 @dataclass
@@ -142,6 +157,154 @@ class Problem:
     @property
     def variable_map(self) -> dict[str, Variable]:
         return {v.name: v for v in self.variables}
+
+    def validate(self) -> None:
+        """Validate names, references, encodings, bounds, and generated bits."""
+
+        if not self.name:
+            raise ValueError("problem name must be nonempty")
+        if not self.variables:
+            raise ValueError("problem must contain at least one variable")
+
+        names: list[str] = []
+        for var in self.variables:
+            if not var.name:
+                raise ValueError("variable names must be nonempty")
+            names.append(var.name)
+            if isinstance(var, BinaryVar):
+                continue
+            if not isfinite(float(var.lower)) or not isfinite(float(var.upper)):
+                raise ValueError(f"{var.name}: bounds must be finite")
+            if var.upper < var.lower:
+                raise ValueError(f"{var.name}: upper bound must be >= lower bound")
+            if isinstance(var, IntegerVar):
+                if var.encoding != "binary":
+                    raise ValueError(f"{var.name}: unsupported integer encoding {var.encoding!r}")
+                if not var.strict_bounds:
+                    raise ValueError(
+                        f"{var.name}: strict_bounds=False is disabled until invalid-state "
+                        "penalties are implemented"
+                    )
+            elif var.encoding not in {"sbe", "unary", "digit_sum_unary", "cumulative_unary"}:
+                raise ValueError(f"{var.name}: unsupported encoding {var.encoding!r}")
+
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise ValueError(f"duplicate variable names: {duplicates}")
+
+        variable_names = set(names)
+        objective_names = set(self.objective.linear)
+        for pair in self.objective.quadratic:
+            if len(pair) != 2:
+                raise ValueError(f"bad quadratic objective key {pair!r}")
+            objective_names.update(pair)
+        unknown_objective = sorted(objective_names - variable_names)
+        if unknown_objective:
+            raise ValueError(f"objective references unknown variables: {unknown_objective}")
+        if not isfinite(self.objective.constant):
+            raise ValueError("objective constant must be finite")
+        for name, coeff in self.objective.linear.items():
+            if not isfinite(coeff):
+                raise ValueError(f"objective coefficient for {name!r} must be finite")
+        for pair, coeff in self.objective.quadratic.items():
+            if not isfinite(coeff):
+                raise ValueError(f"objective coefficient for {pair!r} must be finite")
+
+        constraint_names: list[str] = []
+        generated_slack_names: set[str] = set()
+        bit_names = set(variable_names)
+
+        from .encodings import encode_variable
+
+        for var in self.variables:
+            enc = encode_variable(var)
+            for bit in enc.bits:
+                if isinstance(var, BinaryVar) and bit == var.name:
+                    continue
+                if bit in bit_names:
+                    raise ValueError(f"generated bit name collision: {bit!r}")
+                bit_names.add(bit)
+
+        for constraint in self.constraints:
+            constraint_names.append(constraint.name)
+            if constraint.sense not in {"<=", ">=", "=="}:
+                raise ValueError(f"{constraint.name}: unsupported sense {constraint.sense!r}")
+            if constraint.slack_type not in {"continuous", "integer"}:
+                raise ValueError(
+                    f"{constraint.name}: unsupported slack_type {constraint.slack_type!r}"
+                )
+            if constraint.slack_encoding not in {
+                "sbe",
+                "unary",
+                "digit_sum_unary",
+                "cumulative_unary",
+            }:
+                raise ValueError(
+                    f"{constraint.name}: unsupported slack encoding {constraint.slack_encoding!r}"
+                )
+            if not isfinite(constraint.rhs):
+                raise ValueError(f"{constraint.name}: rhs must be finite")
+            if not isfinite(constraint.penalty) or constraint.penalty <= 0.0:
+                raise ValueError(f"{constraint.name}: penalty must be finite and positive")
+            if not isfinite(constraint.slack_lower):
+                raise ValueError(f"{constraint.name}: slack lower bound must be finite")
+            if constraint.slack_upper is not None and not isfinite(constraint.slack_upper):
+                raise ValueError(f"{constraint.name}: slack upper bound must be finite")
+            if constraint.slack_digits < 1:
+                raise ValueError(f"{constraint.name}: slack digits must be >= 1")
+            unknown = sorted(set(constraint.linear) - variable_names)
+            if unknown:
+                raise ValueError(f"{constraint.name}: references unknown variables {unknown}")
+            for name, coeff in constraint.linear.items():
+                if not isfinite(coeff):
+                    raise ValueError(f"{constraint.name}: coefficient for {name!r} must be finite")
+
+            if constraint.sense != "==":
+                slack_name = constraint.slack_name or f"s_{constraint.name}"
+                if slack_name in variable_names or slack_name in generated_slack_names:
+                    raise ValueError(
+                        f"{constraint.name}: generated slack name collision {slack_name!r}"
+                    )
+                generated_slack_names.add(slack_name)
+                if constraint.slack_type == "integer":
+                    upper = constraint.slack_upper
+                    if upper is None:
+                        raise ValueError(
+                            f"{constraint.name}: integer slacks require explicit slack_upper"
+                        )
+                    if float(constraint.slack_lower).is_integer() is False or float(
+                        upper
+                    ).is_integer() is False:
+                        raise ValueError(
+                            f"{constraint.name}: integer slack bounds must be integral"
+                        )
+                    slack: Variable = IntegerVar(
+                        slack_name,
+                        int(round(constraint.slack_lower)),
+                        int(round(upper)),
+                    )
+                else:
+                    upper = constraint.slack_upper
+                    if upper is None:
+                        upper = max(constraint.slack_lower, 1.0)
+                    slack = SlackVar(
+                        slack_name,
+                        constraint.slack_lower,
+                        upper,
+                        constraint.slack_digits,
+                        constraint.slack_encoding,
+                    )
+                enc = encode_variable(slack)
+                for bit in enc.bits:
+                    if bit in bit_names:
+                        raise ValueError(f"generated bit name collision: {bit!r}")
+                    bit_names.add(bit)
+
+        duplicate_constraints = sorted(
+            {name for name in constraint_names if constraint_names.count(name) > 1}
+        )
+        if duplicate_constraints:
+            raise ValueError(f"duplicate constraint names: {duplicate_constraints}")
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> Problem:
