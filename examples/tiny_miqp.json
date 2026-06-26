@@ -1,0 +1,45 @@
+{
+  "name": "tiny_miqp",
+  "variables": [
+    {
+      "name": "x",
+      "type": "continuous",
+      "lower": 0.0,
+      "upper": 3.0,
+      "digits": 1,
+      "encoding": "sbe"
+    },
+    {
+      "name": "y",
+      "type": "integer",
+      "lower": 0,
+      "upper": 2
+    }
+  ],
+  "objective": {
+    "constant": 2.25,
+    "linear": {
+      "x": -3.0,
+      "y": 0.2
+    },
+    "quadratic": [
+      {
+        "vars": ["x", "x"],
+        "coef": 1.0
+      }
+    ]
+  },
+  "constraints": [
+    {
+      "name": "demand",
+      "linear": {
+        "x": 1.0,
+        "y": 1.0
+      },
+      "sense": ">=",
+      "rhs": 2.0,
+      "penalty": 50.0,
+      "slack_digits": 1
+    }
+  ]
+}
