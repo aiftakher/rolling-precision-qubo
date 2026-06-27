@@ -116,5 +116,6 @@ Please cite our work if you use this code in your research.
   author={Iftakher, Ashfaq and Turkay, Metin and Hasan, MM Faruque},
   journal={Computers \& Chemical Engineering},
   year={2026},
-  publisher={Elsevier}
+  publisher={Elsevier},
+  DOI = {\url{https://doi.org/10.1016/j.compchemeng.2026.109757}},
 }
