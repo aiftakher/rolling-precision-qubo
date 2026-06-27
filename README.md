@@ -108,5 +108,13 @@ artifact; accepted reference data lives under `data/`.
 
 ## Citation
 
-Use `CITATION.cff` and cite the paper above when publishing results derived from
-this package.
+Please cite our work if you use this code in your research.
+
+```bibtex
+@article{iftakher2026quantum,
+  title={Solving Mixed-Integer Problems as QUBO: Encodings, Reformulations, and Rolling-precision Algorithm},
+  author={Iftakher, Ashfaq and Turkay, Metin and Hasan, MM Faruque},
+  journal={Computers \& Chemical Engineering},
+  year={2026},
+  publisher={Elsevier}
+}
