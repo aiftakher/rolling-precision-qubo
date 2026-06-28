@@ -69,7 +69,7 @@ rpqubo reproduce-paper --example all --output-dir outputs/paper
 - SBE decimal encoding with weights `(1, 2, 3, 3)` plus tail bit.
 - Digit-sum unary and cumulative-unary encodings. Cumulative-unary variables
   require an explicit `ordering_penalty`.
-- Bounded integer encoding for non-power-of-two ranges.
+- Bounded integer encoding.
 - Explicit slack-variable reformulation for inequalities.
 - Sparse QUBO object with linear terms, quadratic terms, offset, and groups.
 - JSON, CSV/COO, NumPy NPZ, and dimod BQM export.
