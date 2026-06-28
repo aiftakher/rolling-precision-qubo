@@ -3,12 +3,10 @@
 `rolling-precision-qubo` is the package version of the research code
 for:
 
-Solving Mixed-Integer Problems as QUBO: Encodings, Reformulations, and Rolling-precision Algorithm
-
 📄 **Paper:** [Solving Mixed-Integer Problems as QUBO: Encodings, Reformulations, and Rolling-precision Algorithm](https://doi.org/10.1016/j.compchemeng.2026.109757)
 
 
-It QUBO models are binary quadratic objectives. This package turns bounded continuous, integer, binary, and slack
+QUBO models are binary quadratic objectives. This package turns bounded continuous, integer, binary, and slack
 variables into binary/QUBO form, supports exact enumeration for small problem instances, and simulated annealing through D-Wave `neal`. It does not implement or claim global optimality.
 
 ## Install
