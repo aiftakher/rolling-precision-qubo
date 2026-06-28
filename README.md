@@ -7,7 +7,7 @@ for:
 
 
 This package turns bounded continuous, integer, binary, and slack
-variables into binary/QUBO form; supports exact enumeration for small problem instances, and simulated annealing through D-Wave `neal`. It does not implement or claim global optimality.
+variables into binary/QUBO form; supports exact enumeration for small problem instances, and simulated annealing through D-Wave `neal`. 
 
 ## Install
 
