@@ -63,8 +63,6 @@ Reproduce paper outputs:
 rpqubo reproduce-paper --example all --output-dir outputs/paper
 ```
 
-`outputs/paper/` is generated output. CI regenerates it and uploads it as an
-artifact; accepted reference data lives under `data/`.
 
 ## Features
 
